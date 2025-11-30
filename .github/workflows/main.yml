@@ -1,0 +1,52 @@
+name: WebStorm on Docker (Tunnel)
+
+on:
+  workflow_dispatch: # Tombol manual
+
+jobs:
+  hack-ide:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Jalankan Container Webtop (XFCE Desktop)
+      - name: Deploy Webtop Container
+        run: |
+          echo "🚀 Menjalankan Docker container..."
+          docker run -d \
+            --name=webtop \
+            --privileged \
+            --shm-size=2gb \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            -e TZ=Asia/Jakarta \
+            -p 3000:3000 \
+            lscr.io/linuxserver/webtop:ubuntu-xfce
+          
+          echo "💤 Nunggu bentar biar container booting..."
+          sleep 10
+
+      # 2. Setup Cloudflare Tunnel (Biar bisa diakses dari luar)
+      - name: Start Tunnel
+        run: |
+          echo "🚇 Mendownload Cloudflared..."
+          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+          
+          echo "🔗 Membuka tunnel..."
+          # Jalankan tunnel background & simpan log
+          cloudflared tunnel --url http://localhost:3000 > tunnel.log 2>&1 &
+          
+          sleep 10
+          
+          echo "========================================================="
+          echo "👇 KLIK LINK DI BAWAH INI BUAT MASUK DESKTOP 👇"
+          echo "========================================================="
+          grep -o 'https://.*\.trycloudflare.com' tunnel.log
+          echo "========================================================="
+          echo "User: abc | Pass: abc"
+          echo "========================================================="
+
+      # 3. Biarin jalan terus (Max 6 jam limit Github Action)
+      - name: Keep Alive
+        run: |
+          echo "☕ Server jalan. Jangan diclose tab ini kalau mau logs-nya update."
+          sleep 360m
