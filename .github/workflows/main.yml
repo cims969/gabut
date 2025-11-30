@@ -1,3 +1,17 @@
+name: CI/CD Stealth Loop
+
+# --- BAGIAN INI YANG HILANG TADI ---
+on: 
+  workflow_dispatch: # Trigger Manual
+
+permissions:
+  contents: read      # Buat checkout code
+  packages: write     # WAJIB: Buat push image ke GHCR
+
+env:
+  # Ganti pake username & nama repo lu
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-stealth-env:latest 
+
 jobs:
   infinite-hustle:
     runs-on: ubuntu-latest
@@ -5,6 +19,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      # 1. Login GHCR
       - name: Login to Container Registry
         uses: docker/login-action@v2
         with:
@@ -12,12 +27,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 2. Pull Backup (Kalo ada)
       - name: Pull Previous State
         continue-on-error: true
         run: docker pull $IMAGE_NAME || echo "New Game? Let's go."
 
-      - name: Initialize Environment (VS Code)
+      # 3. RUNNING THE CONTAINER (Privileged & Host Network)
+      - name: Initialize Environment
         run: |
+          # Logic: Cek dulu backup ada gak
           if docker image inspect $IMAGE_NAME > /dev/null 2>&1; then
              TARGET_IMAGE=$IMAGE_NAME
              echo ">>> RESUMING FROM BACKUP <<<"
@@ -26,7 +44,8 @@ jobs:
              echo ">>> STARTING FRESH <<<"
           fi
 
-          # Main Container (VS Code)
+          # Jalanin VS Code (Main Container)
+          # Port VS Code default image ini: 8443
           docker run -d \
             --name npm-dependency-check \
             --privileged \
@@ -38,50 +57,60 @@ jobs:
             -v ${{ github.workspace }}:/config/workspace \
             $TARGET_IMAGE
 
-      # --- 👇 INI LOGIC BARU YANG LU BUTUHIN 👇 ---
+      # 4. AUTO-START PANEL (LOGIC BARU)
       - name: Auto-Start Panel Service
         run: |
           echo ">>> KICKSTARTING PANEL... <<<"
           
-          # Logic: Kita suruh 'npm-dependency-check' (VS Code) buat jalanin Nginx
-          # Kenapa lewat dia? Biar seolah-olah dia yg kerja (Stealth).
-          
-          # Hapus container lama (kalo ada sisa hantu) biar gak conflict name
+          # Install Docker CLI dulu di dalam container VS Code (PENTING!)
+          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io curl"
+
+          # Hapus container lama (kalo ada sisa) biar gak error conflict
           docker exec npm-dependency-check bash -c "docker rm -f my-panel || true"
           
           # Jalankan Panel Nginx (Port 3000)
-          # PENTING: Pake -d (Detach) biar jalan di background
+          # Nanti kalau lu udah punya bot sendiri, ganti baris ini pake command run bot lu
           docker exec npm-dependency-check bash -c "docker run -d --name my-panel -p 3000:80 nginx:alpine"
           
           echo ">>> PANEL IS RUNNING ON PORT 3000 <<<"
 
-      # --- 👆 BATAS LOGIC BARU 👆 ---
-
-      - name: Inject Network Bridge (Tunnel)
+      # 5. Inject Tunnel (Stealth Rename)
+      - name: Inject Network Bridge
         env:
           TUNNEL_TOKEN: ${{ secrets.CF_TOKEN }}
         run: |
           # Install Cloudflared
-          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y curl docker.io"
           docker exec npm-dependency-check bash -c "curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && dpkg -i cloudflared.deb"
           
-          # Rename Process
+          # Rename Process (Disguise)
           docker exec npm-dependency-check bash -c "mv /usr/bin/cloudflared /usr/bin/sys-integrity-check"
           
           # Run Tunnel (Silent)
           docker exec -d npm-dependency-check bash -c "sys-integrity-check tunnel run --token $TUNNEL_TOKEN > /dev/null 2>&1 &"
 
+      # 6. Keep Alive (Looping 5 Jam 50 Menit)
       - name: System Monitoring Loop
         run: |
-          echo ">>> ALL SYSTEMS GO <<<"
+          echo ">>> ENVIRONMENT READY <<<"
+          echo "VS Code Port: 8443 (Localhost)"
+          echo "Panel Port: 3000 (Localhost)"
+          
+          # 21000 detik = 5 Jam 50 Menit
           END=$((SECONDS+21000))
           while [ $SECONDS -lt $END ]; do
-            echo "[INFO] Heartbeat... $(date)"
+            echo "[INFO] System Heartbeat... $(date)"
             sleep 60
           done
 
+      # 7. SAVE STATE (Backup Terakhir)
       - name: Commit & Push State
-        if: always()
+        if: always() # Jalanin mau sukses/gagal/cancel
         run: |
+          echo ">>> TIME IS UP. SAVING STATE... <<<"
+          
+          # Commit container jadi image baru
           docker commit npm-dependency-check $IMAGE_NAME
+          
+          # Push ke GHCR
           docker push $IMAGE_NAME
+          echo ">>> BACKUP SECURED. SEE YOU IN NEXT RUN. <<<"
