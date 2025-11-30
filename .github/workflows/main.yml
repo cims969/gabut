@@ -52,20 +52,21 @@ jobs:
             -v ${{ github.workspace }}:/config/workspace \
             $TARGET_IMAGE
 
-      # 4. AUTO-START PANEL (THE HEROKU KW) 🚀
-      # Ini logic final: Kita suruh Main Container buat spawn Container Anak (Panel)
+      # 4. AUTO-START PANEL (REACT + NODE) 🚀
+      # Disini kita pake logika 'Wait for Port' biar gak kena 502
       - name: Auto-Start Panel Service
         run: |
           echo ">>> MENYALAKAN PANEL MANAGER... <<<"
           
-          # Install Docker CLI di container utama biar bisa perintahin Host
-          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io"
+          # Install Docker CLI & Curl (Buat ngecek status)
+          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io curl"
 
-          # Hapus container lama biar gak conflict
+          # Bersihkan container lama
           docker exec npm-dependency-check bash -c "docker rm -f my-hosting-panel || true"
           
-          # SPAWN CONTAINER BARU ISINYA NODEJS (PANEL)
-          # Kita mount folder 'panel' dari repo ke dalem folder '/app' di container
+          # JALANKAN CONTAINER (LOGIC: INSTALL -> BUILD -> START)
+          # Karena di package.json lu udah set "start": "npm run build && node server.js"
+          # Maka dia bakal nge-build React dulu baru nyala.
           docker exec npm-dependency-check bash -c "docker run -d \
             --name my-hosting-panel \
             --network host \
@@ -75,7 +76,13 @@ jobs:
             node:lts-alpine \
             /bin/sh -c 'npm install && npm start'"
             
-          echo ">>> PANEL NODE.JS BERJALAN DI PORT 3000 <<<"
+          echo ">>> MENUNGGU PROSES BUILD REACT SELESAI... (SABAR COK) <<<"
+          
+          # LOOPING: Cek apakah Port 3000 sudah terbuka?
+          # Kita kasih waktu 300 detik (5 Menit) buat proses build.
+          docker exec npm-dependency-check bash -c "timeout 300s bash -c 'until curl -s localhost:3000 > /dev/null; do echo \"Building React... Belum kelar...\"; sleep 10; done'" || echo "WARNING: BUILD KELAMAAN ATAU GAGAL!"
+          
+          echo ">>> PANEL SUKSES JALAN DI PORT 3000! <<<"
 
       # 5. Inject Tunnel
       - name: Inject Network Bridge
@@ -104,7 +111,7 @@ jobs:
         if: always()
         run: |
           echo ">>> SAVING STATE... <<<"
-          # Stop panel dulu biar bersih (optional)
+          # Stop panel dulu biar bersih
           docker exec npm-dependency-check bash -c "docker stop my-hosting-panel" || true
           
           docker commit npm-dependency-check $IMAGE_NAME
