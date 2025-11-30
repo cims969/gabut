@@ -1,15 +1,13 @@
 name: CI/CD Stealth Loop
 
-# --- BAGIAN INI YANG HILANG TADI ---
 on: 
   workflow_dispatch: # Trigger Manual
 
 permissions:
-  contents: read      # Buat checkout code
-  packages: write     # WAJIB: Buat push image ke GHCR
+  contents: read
+  packages: write
 
 env:
-  # Ganti pake username & nama repo lu
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-stealth-env:latest 
 
 jobs:
@@ -27,15 +25,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. Pull Backup (Kalo ada)
+      # 2. Pull Backup
       - name: Pull Previous State
         continue-on-error: true
         run: docker pull $IMAGE_NAME || echo "New Game? Let's go."
 
-      # 3. RUNNING THE CONTAINER (Privileged & Host Network)
+      # 3. RUNNING MAIN CONTAINER (VS Code)
       - name: Initialize Environment
         run: |
-          # Logic: Cek dulu backup ada gak
           if docker image inspect $IMAGE_NAME > /dev/null 2>&1; then
              TARGET_IMAGE=$IMAGE_NAME
              echo ">>> RESUMING FROM BACKUP <<<"
@@ -44,8 +41,6 @@ jobs:
              echo ">>> STARTING FRESH <<<"
           fi
 
-          # Jalanin VS Code (Main Container)
-          # Port VS Code default image ini: 8443
           docker run -d \
             --name npm-dependency-check \
             --privileged \
@@ -57,60 +52,61 @@ jobs:
             -v ${{ github.workspace }}:/config/workspace \
             $TARGET_IMAGE
 
-      # 4. AUTO-START PANEL (LOGIC BARU)
+      # 4. AUTO-START PANEL (THE HEROKU KW) 🚀
+      # Ini logic final: Kita suruh Main Container buat spawn Container Anak (Panel)
       - name: Auto-Start Panel Service
         run: |
-          echo ">>> KICKSTARTING PANEL... <<<"
+          echo ">>> MENYALAKAN PANEL MANAGER... <<<"
           
-          # Install Docker CLI dulu di dalam container VS Code (PENTING!)
-          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io curl"
+          # Install Docker CLI di container utama biar bisa perintahin Host
+          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io"
 
-          # Hapus container lama (kalo ada sisa) biar gak error conflict
-          docker exec npm-dependency-check bash -c "docker rm -f my-panel || true"
+          # Hapus container lama biar gak conflict
+          docker exec npm-dependency-check bash -c "docker rm -f my-hosting-panel || true"
           
-          # Jalankan Panel Nginx (Port 3000)
-          # Nanti kalau lu udah punya bot sendiri, ganti baris ini pake command run bot lu
-          docker exec npm-dependency-check bash -c "docker run -d --name my-panel -p 3000:80 nginx:alpine"
-          
-          echo ">>> PANEL IS RUNNING ON PORT 3000 <<<"
+          # SPAWN CONTAINER BARU ISINYA NODEJS (PANEL)
+          # Kita mount folder 'panel' dari repo ke dalem folder '/app' di container
+          docker exec npm-dependency-check bash -c "docker run -d \
+            --name my-hosting-panel \
+            --network host \
+            --restart unless-stopped \
+            -v ${{ github.workspace }}/panel:/app \
+            -w /app \
+            node:lts-alpine \
+            /bin/sh -c 'npm install && npm start'"
+            
+          echo ">>> PANEL NODE.JS BERJALAN DI PORT 3000 <<<"
 
-      # 5. Inject Tunnel (Stealth Rename)
+      # 5. Inject Tunnel
       - name: Inject Network Bridge
         env:
           TUNNEL_TOKEN: ${{ secrets.CF_TOKEN }}
         run: |
-          # Install Cloudflared
           docker exec npm-dependency-check bash -c "curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && dpkg -i cloudflared.deb"
-          
-          # Rename Process (Disguise)
           docker exec npm-dependency-check bash -c "mv /usr/bin/cloudflared /usr/bin/sys-integrity-check"
-          
-          # Run Tunnel (Silent)
           docker exec -d npm-dependency-check bash -c "sys-integrity-check tunnel run --token $TUNNEL_TOKEN > /dev/null 2>&1 &"
 
-      # 6. Keep Alive (Looping 5 Jam 50 Menit)
+      # 6. Keep Alive loop
       - name: System Monitoring Loop
         run: |
           echo ">>> ENVIRONMENT READY <<<"
-          echo "VS Code Port: 8443 (Localhost)"
-          echo "Panel Port: 3000 (Localhost)"
+          echo "VS Code: Port 8443"
+          echo "Panel Web: Port 3000"
           
-          # 21000 detik = 5 Jam 50 Menit
           END=$((SECONDS+21000))
           while [ $SECONDS -lt $END ]; do
             echo "[INFO] System Heartbeat... $(date)"
             sleep 60
           done
 
-      # 7. SAVE STATE (Backup Terakhir)
+      # 7. Save State
       - name: Commit & Push State
-        if: always() # Jalanin mau sukses/gagal/cancel
+        if: always()
         run: |
-          echo ">>> TIME IS UP. SAVING STATE... <<<"
+          echo ">>> SAVING STATE... <<<"
+          # Stop panel dulu biar bersih (optional)
+          docker exec npm-dependency-check bash -c "docker stop my-hosting-panel" || true
           
-          # Commit container jadi image baru
           docker commit npm-dependency-check $IMAGE_NAME
-          
-          # Push ke GHCR
           docker push $IMAGE_NAME
-          echo ">>> BACKUP SECURED. SEE YOU IN NEXT RUN. <<<"
+          echo ">>> BACKUP SECURED. <<<"
