@@ -34,6 +34,7 @@ jobs:
             -p 8888:8888 \
             -e JUPYTER_TOKEN='gantigw' \
             -e JUPYTER_ENABLE_LAB=yes \
+            --user root \
             -v ${{ github.workspace }}:/home/jovyan/work \
             jupyter/scipy-notebook:latest
 
