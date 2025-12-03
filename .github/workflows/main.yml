@@ -1,117 +1,30 @@
-name: CI/CD Stealth Loop (MODE VPS)
+name: Time Travel Commit ⏳
 
-on: 
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/my-stealth-env:latest 
+on:
+  workflow_dispatch: # Ini artinya script ini cuma jalan kalau lu KLIK tombol
 
 jobs:
-  infinite-hustle:
+  backdate_commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Login to Container Registry
-        uses: docker/login-action@v2
+      - uses: actions/checkout@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull Previous State
-        continue-on-error: true
-        run: docker pull $IMAGE_NAME || echo "New Game? Let's go."
-
-      # 3. RUNNING MAIN CONTAINER
-      - name: Initialize Environment
+          fetch-depth: 0 # Ambil semua history biar ga konflik
+      
+      - name: Manipulasi Waktu ke 5 Jan 2025
         run: |
-          if docker image inspect $IMAGE_NAME > /dev/null 2>&1; then
-             TARGET_IMAGE=$IMAGE_NAME
-             echo ">>> RESUMING FROM BACKUP <<<"
-          else
-             TARGET_IMAGE="lscr.io/linuxserver/code-server:latest"
-             echo ">>> STARTING FRESH <<<"
-          fi
-
-          docker run -d \
-            --name npm-dependency-check \
-            --privileged \
-            --network host \
-            -e PUID=0 -e PGID=0 \
-            -e PASSWORD=kopisetarbak \
-            -e TZ=Asia/Jakarta \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v ${{ github.workspace }}:/config/workspace \
-            $TARGET_IMAGE
-
-      # 4. AUTO-START PANEL (LOGIC: INTERNAL STORAGE) 📂
-      - name: Auto-Start Panel Service
-        run: |
-          echo ">>> MENYALAKAN PANEL MANAGER (MODE INTERNAL)... <<<"
+          git config --global user.name "cims969"
+          git config --global user.email "vimsecc@proton.me"
           
-          docker exec npm-dependency-check bash -c "apt-get update && apt-get install -y docker.io curl"
-          docker exec npm-dependency-check bash -c "docker rm -f my-hosting-panel || true"
-          
-          # A. MIGRASI KODINGAN (PENTING!)
-          # Kita pindahin kodingan dari Repo (/config/workspace/panel) ke "Brankas Aman" (/root/live-panel)
-          # Folder /config/workspace itu bakal kereset tiap GHA jalan, jadi JANGAN simpen codingan utama disitu.
-          
-          docker exec npm-dependency-check bash -c "
-            if [ ! -d '/root/live-panel' ]; then
-              echo '>>> SETUP AWAL: COPY DARI REPO KE INTERNAL... <<<'
-              mkdir -p /root/live-panel
-              cp -r /config/workspace/panel/* /root/live-panel/
-            else
-              echo '>>> MENGGUNAKAN KODINGAN TERAKHIR DARI IMAGE... <<<'
-            fi
-          "
-
-          # B. JALANKAN PANEL DARI FOLDER INTERNAL (/root/live-panel)
-          # Perhatikan: -v /root/live-panel:/app
-          docker exec npm-dependency-check bash -c "docker run -d \
-            --name my-hosting-panel \
-            --network host \
-            --restart unless-stopped \
-            -v /root/live-panel:/app \
-            -w /app \
-            node:lts-alpine \
-            /bin/sh -c 'npm install --unsafe-perm && npm run build && node server.js'"
-            
-          echo ">>> MENUNGGU PANEL NYALA... <<<"
-          docker exec npm-dependency-check bash -c "timeout 300s bash -c 'until curl -s localhost:3000 > /dev/null; do echo \"Sedang Build... Sabar...\"; sleep 10; done'" || echo "WARNING: BUILD LAMA!"
-          
-          echo ">>> PANEL SUKSES! EDIT KODINGAN LU DI FOLDER /root/live-panel LEWAT VS CODE! <<<"
-
-      # 5. Inject Tunnel
-      - name: Inject Network Bridge
-        env:
-          TUNNEL_TOKEN: ${{ secrets.CF_TOKEN }}
-        run: |
-          docker exec npm-dependency-check bash -c "curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && dpkg -i cloudflared.deb"
-          docker exec npm-dependency-check bash -c "mv /usr/bin/cloudflared /usr/bin/sys-integrity-check"
-          docker exec -d npm-dependency-check bash -c "sys-integrity-check tunnel run --token $TUNNEL_TOKEN > /dev/null 2>&1 &"
-
-      # 6. Keep Alive
-      - name: System Monitoring Loop
-        run: |
-          END=$((SECONDS+21000))
-          while [ $SECONDS -lt $END ]; do
-            echo "[INFO] System Heartbeat... $(date)"
-            sleep 60
+          # Kita bom 8 commit sekaligus biar warnanya IJO TUA (Pekat)
+          # Loop 8 kali
+          for i in {1..8}
+          do
+             # --date itu kuncinya. Format: YYYY-MM-DDThh:mm:ss
+             # Kita set jam beda-beda dikit biar natural
+             git commit --allow-empty --date="2025-01-05T14:0$i:00" -m "Refactor backend module logic for Q1 release"
           done
-
-      # 7. Save State
-      - name: Commit & Push State
-        if: always()
-        run: |
-          echo ">>> SAVING INTERNAL STATE... <<<"
-          docker exec npm-dependency-check bash -c "docker stop my-hosting-panel" || true
-          docker commit npm-dependency-check $IMAGE_NAME
-          docker push $IMAGE_NAME
-          echo ">>> PERUBAHAN LU UDAH KESIMPEN DI IMAGE! <<<"
+          
+          git push
